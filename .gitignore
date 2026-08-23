@@ -1,0 +1,17 @@
+.vite/
+nettside/node_modules/
+nettside/.svelte-kit/
+nettside/build/
+nettside/dist/
+.DS_Store
+*.log
+nettside/.env
+nettside/.env.*
+!nettside/.env.example
+
+# Internt HR-grunnlag og e-post skal aldri inn i repo eller bygg.
+/data/
+/*.eml
+/nettside/default_data/
+/nettside/static/default_data/
+*:Zone.Identifier
