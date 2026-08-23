@@ -1987,16 +1987,22 @@
         }
         return;
       }
-      if (attempt < 39) watchFileSelection(input, role, attempt + 1);
+      if (attempt < 39) {
+        watchFileSelection(input, role, attempt + 1);
+        return;
+      }
+
+      fileSelectionWatchers.delete(input);
+      error = "Ingen fildata ble mottatt fra nettleseren. Velg filene på nytt. Hvis filnavnene vises uten at kortene oppdateres, åpne siden i Chrome eller Edge.";
     }, 250);
     fileSelectionWatchers.set(input, timer);
   }
 
   async function handleUpload(event) {
     const input = event.currentTarget;
-    stopFileSelectionWatcher(input);
     const incoming = consumeSelectedFiles(input);
     if (!incoming.length) return;
+    stopFileSelectionWatcher(input);
 
     loading = true;
     error = "";
@@ -2015,9 +2021,9 @@
 
   async function handleRoleUpload(role, event) {
     const input = event.currentTarget;
-    stopFileSelectionWatcher(input);
     const incoming = consumeSelectedFiles(input);
     if (!incoming.length) return;
+    stopFileSelectionWatcher(input);
 
     loading = true;
     error = "";
@@ -2648,7 +2654,7 @@
             </div>
             <div class="batch-upload-control">
               <label for="batch-upload" class="upload-control-label">Last opp alle fire samlet</label>
-              <input id="batch-upload" class="upload-file-input upload-file-input-batch" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:click={(event) => watchFileSelection(event.currentTarget)} on:input={handleUpload} on:change={handleUpload} />
+              <input id="batch-upload" class="upload-file-input upload-file-input-batch" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:pointerdown={(event) => watchFileSelection(event.currentTarget)} on:input={handleUpload} on:change={handleUpload} />
             </div>
           </div>
 
@@ -2668,7 +2674,7 @@
                   {#if roleUploads[card.role]}
                     <span class="upload-selected-file">{roleUploads[card.role].fileName}</span>
                   {/if}
-                  <input class="upload-file-input" type="file" aria-label={`Velg Excel-fil for ${card.title}`} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:click={(event) => watchFileSelection(event.currentTarget, card.role)} on:input={(event) => handleRoleUpload(card.role, event)} on:change={(event) => handleRoleUpload(card.role, event)} />
+                  <input class="upload-file-input" type="file" aria-label={`Velg Excel-fil for ${card.title}`} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:pointerdown={(event) => watchFileSelection(event.currentTarget, card.role)} on:input={(event) => handleRoleUpload(card.role, event)} on:change={(event) => handleRoleUpload(card.role, event)} />
                   <span class="upload-card-hint text-xs">XLSX · maks 15 MB</span>
                 </div>
               </article>

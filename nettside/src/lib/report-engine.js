@@ -105,7 +105,7 @@ export function validateWorkbookFile(file, maxBytes = 15 * 1024 * 1024) {
 
 export function consumeSelectedFiles(fileInput) {
   const files = Array.from(fileInput?.files || []);
-  if (fileInput) fileInput.value = "";
+  if (fileInput && files.length) fileInput.value = "";
   return files;
 }
 

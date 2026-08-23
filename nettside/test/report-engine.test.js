@@ -19,6 +19,15 @@ test("filvalget kopieres og nullstilles før asynkron Excel-lesing", () => {
   assert.equal(input.value, "");
 });
 
+test("et tidlig filsignal uten FileList beholder valget til filene er tilgjengelige", () => {
+  const input = { files: [], value: "C:\\fakepath\\fastlønn.xlsx" };
+
+  const captured = consumeSelectedFiles(input);
+
+  assert.deepEqual(captured, []);
+  assert.equal(input.value, "C:\\fakepath\\fastlønn.xlsx");
+});
+
 test("norske bevegelige helligdager for 2025 følger kalenderen", () => {
   const holidays = norwegianPublicHolidayKeys(2025);
   for (const date of ["2025-04-17", "2025-04-18", "2025-04-21", "2025-05-29", "2025-06-09"]) {
