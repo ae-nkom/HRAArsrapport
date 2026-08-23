@@ -716,6 +716,126 @@
       tone: !foreldrepermisjonEmployees.length ? "neutral" : foreldrepermisjonGroupedEmployees.length === foreldrepermisjonEmployees.length ? "ok" : "warning"
     }
   ];
+  $: datasetReadinessIssues = (() => {
+    if (!uploadedFiles.length) return [];
+
+    const issues = [];
+    if (missingRoles.length) {
+      issues.push({
+        id: "missing-files",
+        title: "Påkrevde filer mangler",
+        detail: `Last opp ${missingRoles.map(roleLabel).join(", ")}.`,
+        action: "Alle fire rådatafilene må være med før rapporten kan kontrolleres."
+      });
+    }
+
+    if (uploadedFiles.some((file) => file.source === "bearbeidet")) {
+      issues.push({
+        id: "processed-source",
+        title: "Bearbeidet fil er brukt som datakilde",
+        detail: "Rapporten skal kunne bygges fra rådatafilene alene.",
+        action: "Bytt ut den bearbeidede filen med tilsvarende rådatauttrekk."
+      });
+    }
+
+    if (uploadedFiles.some((file) => file.source === "referanse")) {
+      issues.push({
+        id: "reference-source",
+        title: "Utregningsskjema er lastet opp som referanse",
+        detail: "Referansearket skal ikke være nødvendig for den ferdige automatiseringen.",
+        action: "Kontroller resultatene, men bruk de fire rådatauttrekkene som rapportgrunnlag."
+      });
+    }
+
+    if (selectedFastlonnYear && !selectedFastlonnYearSnapshots.some((file) => file.snapshotKey?.slice(5) === "05-01")) {
+      issues.push({
+        id: "missing-may-snapshot",
+        title: `Fastlønn per 01.05.${selectedFastlonnYear} mangler`,
+        detail: "Løsningen har ikke et eget uttrekk for rapporteringstidspunktet 1. mai.",
+        action: "Last opp et fastlønnsuttrekk fra 01.05 hvis dette tidspunktet skal brukes i rapporten."
+      });
+    }
+
+    if (report?.fastlonn?.unknownPositionCodes?.length) {
+      const codes = report.fastlonn.unknownPositionCodes
+        .map(({ code, count }) => `${code} (${formatInteger(count)} ansatt${count === 1 ? "" : "e"})`)
+        .join(", ");
+      issues.push({
+        id: "unknown-position-codes",
+        title: "Stillingskoder uten rapportgruppe",
+        detail: `${codes} er utelatt fra lønns- og kjønnsfordelingen.`,
+        action: "Avklar hvilken rapportgruppe hver kode tilhører, og oppdater grupperingsregelen før publisering."
+      });
+    }
+
+    if (selectedFastlonnYear === "2025" && report?.employment && (report.employment.partTime.women !== 2 || report.employment.partTime.men !== 2)) {
+      issues.push({
+        id: "part-time-definition",
+        title: "Deltid stemmer ikke med oppgitt fasit",
+        detail: `Fasiten sier 2 kvinner og 2 menn. Uttrekket gir ${formatInteger(report.employment.partTime.women)} kvinner og ${formatInteger(report.employment.partTime.men)} menn når deltid defineres som deltidsprosent under 100.`,
+        action: "Avklar definisjonen og korriger enten uttrekket eller beregningsregelen."
+      });
+    }
+
+    for (const [id, label, rows, reconciliation] of [
+      ["overtime-match", "Overtid", overtidSourceRows, overtidReconciliation],
+      ["guard-match", "Vakttillegg", vakttilleggSourceRows, vakttilleggReconciliation]
+    ]) {
+      if (rows.length && reconciliation?.unmatchedCount) {
+        issues.push({
+          id,
+          title: `${formatInteger(reconciliation.unmatchedCount)} mottakere av ${label.toLowerCase()} mangler i fastlønn`,
+          detail: `${formatCurrency(reconciliation.unmatchedAmount)} er med i kildetotalen, men kan ikke fordeles på stillingsgruppe eller kjønn.`,
+          action: "Kontroller om personene mangler i fastlønnsuttrekket, eller om navnene er skrevet forskjellig.",
+          people: reconciliation.unmatchedPeople
+        });
+      }
+    }
+
+    if (foreldrepermisjonEmployees.length > foreldrepermisjonGroupedEmployees.length) {
+      issues.push({
+        id: "leave-match",
+        title: `${formatInteger(foreldrepermisjonEmployees.length - foreldrepermisjonGroupedEmployees.length)} mottakere av foreldrepermisjon mangler i fastlønn`,
+        detail: `${formatInteger(foreldrepermisjonGroupedEmployees.length)} av ${formatInteger(foreldrepermisjonEmployees.length)} personer er koblet til en rapportgruppe.`,
+        action: "Kontroller navn og om personene finnes i fastlønnsuttrekket."
+      });
+    }
+
+    for (const [id, label, rows, files] of [
+      ["overtime-empty", "overtid", overtidSourceRows, overtidSourceFiles],
+      ["guard-empty", "vakttillegg", vakttilleggSourceRows, vakttilleggSourceFiles],
+      ["leave-empty", "foreldrepermisjon", foreldrepermisjonSourceRows, foreldrepermisjonSourceFiles]
+    ]) {
+      if (files.length && !rows.length) {
+        issues.push({
+          id,
+          title: `Ingen ${label} funnet for ${selectedFastlonnYear || "valgt år"}`,
+          detail: "Filen er lastet opp, men datofilteret gir ingen rader i rapportåret.",
+          action: "Kontroller datokolonnen og at riktig årsfil er lastet opp."
+        });
+      }
+    }
+
+    return issues;
+  })();
+  $: manualInputTasks = [
+    { id: "new-hires", label: "Antall nyansatte", field: "nyansatteCount", description: "Brukes i årsrapportens bemanningsomtale." },
+    { id: "sick-total", label: "Samlet sykefravær", field: "samletSykefravaer", description: "Oppgis i prosent." },
+    { id: "sick-women", label: "Sykefravær kvinner", field: "sykefravaerKvinner", description: "Oppgis i prosent." },
+    { id: "sick-men", label: "Sykefravær menn", field: "sykefravaerMenn", description: "Oppgis i prosent." }
+  ].map((task) => ({
+    ...task,
+    complete: Boolean(String(manualReportInputs[task.field] ?? "").trim())
+  }));
+  $: incompleteManualInputCount = manualInputTasks.filter((task) => !task.complete).length;
+  $: manualAssessmentTasks = [
+    "Avklar om registrert deltid er frivillig eller ufrivillig. Dette kan ikke leses av deltidsprosenten alene.",
+    "Fyll inn historikktabellen for rekruttering og inkludering de siste fem årene, inkludert målgrupper, ansettelsesform, tiltak og overgang til fast stilling.",
+    ...reportActionItems.filter((item) => !item.startsWith("Avklar datakvalitetsavvikene") && !item.startsWith("Datagrunnlaget ser")),
+    "Beskriv tiltak og resultater for aktivitets- og redegjørelsesplikten (ARP).",
+    "Beskriv samarbeid med utdanningsinstitusjoner, lærlinger, traineeordninger, praksis og arbeidstrening.",
+    "Dokumenter forbedringstiltak, ansvar og oppfølging før endelig publisering."
+  ];
   $: reportHighlights = [
     overallGenderBalance
       ? {
@@ -797,6 +917,15 @@
 
   function formatCurrency(value) {
     return `${integerFormatter.format(Number(value ?? 0))} kr`;
+  }
+
+  function roleLabel(role) {
+    return ({
+      fastlønn: "fastlønn",
+      overtid: "overtid",
+      vakttillegg: "vakttillegg",
+      foreldrepermisjon: "foreldrepermisjon"
+    })[role] || role;
   }
 
   function countDistinctValues(values, normalizer = (value) => value) {
@@ -1690,23 +1819,33 @@
     for (const row of rows) {
       const key = normalizePersonName(row["Etternavn, fornavn"]);
       if (!key) continue;
-      sourceTotals.set(key, (sourceTotals.get(key) || 0) + Number(row["Beløp"] || 0));
+      const current = sourceTotals.get(key) || {
+        name: String(row["Etternavn, fornavn"]),
+        amount: 0
+      };
+      current.amount += Number(row["Beløp"] || 0);
+      sourceTotals.set(key, current);
     }
-    const positiveSource = [...sourceTotals.entries()].filter(([, amount]) => amount > 0);
+    const positiveSource = [...sourceTotals.entries()].filter(([, person]) => person.amount > 0);
     const matchedKeys = new Set(
       positiveSource
         .filter(([key]) => employeeIndex.byName.get(key)?.group)
         .map(([key]) => key)
     );
-    const sourceAmount = positiveSource.reduce((sum, [, amount]) => sum + amount, 0);
-    const matchedAmount = positiveSource.reduce((sum, [key, amount]) => sum + (matchedKeys.has(key) ? amount : 0), 0);
+    const sourceAmount = positiveSource.reduce((sum, [, person]) => sum + person.amount, 0);
+    const matchedAmount = positiveSource.reduce((sum, [key, person]) => sum + (matchedKeys.has(key) ? person.amount : 0), 0);
+    const unmatchedPeople = positiveSource
+      .filter(([key]) => !matchedKeys.has(key))
+      .map(([, person]) => person)
+      .sort((left, right) => right.amount - left.amount || left.name.localeCompare(right.name, "nb"));
     return {
       sourceCount: positiveSource.length,
       matchedCount: matchedKeys.size,
       unmatchedCount: positiveSource.length - matchedKeys.size,
       sourceAmount,
       matchedAmount,
-      unmatchedAmount: sourceAmount - matchedAmount
+      unmatchedAmount: sourceAmount - matchedAmount,
+      unmatchedPeople
     };
   }
 
@@ -2635,6 +2774,99 @@
         {/each}
       </section>
 
+      {#if uploadedFiles.length}
+        <section class="readiness-panel" aria-labelledby="readiness-title">
+          <div class="readiness-header">
+            <div>
+              <p class="panel-eyebrow">Kontroll før rapport</p>
+              <h2 id="readiness-title" class="readiness-title">Dette må følges opp</h2>
+              <p class="readiness-lead">Listen oppdateres automatisk når du laster opp nye filer eller fyller inn manuelle tall.</p>
+            </div>
+            <div class="readiness-counts" aria-label="Status for gjenstående arbeid">
+              <span class={`readiness-count ${datasetReadinessIssues.length ? "readiness-count-error" : "readiness-count-ok"}`}>
+                {datasetReadinessIssues.length} dataavvik
+              </span>
+              <span class={`readiness-count ${incompleteManualInputCount ? "readiness-count-warning" : "readiness-count-ok"}`}>
+                {incompleteManualInputCount} manuelle tall mangler
+              </span>
+            </div>
+          </div>
+
+          <div class="readiness-grid">
+            <section class="readiness-section" aria-labelledby="dataset-issues-title">
+              <div class="readiness-section-head">
+                <div>
+                  <p class="readiness-kicker">Datagrunnlag</p>
+                  <h3 id="dataset-issues-title">Må rettes eller avklares</h3>
+                </div>
+                <button class="readiness-link" type="button" on:click={() => (activeTab = "opplasting")}>Gå til filer</button>
+              </div>
+
+              {#if datasetReadinessIssues.length}
+                <ol class="readiness-issue-list">
+                  {#each datasetReadinessIssues as issue}
+                    <li class="readiness-issue">
+                      <div class="readiness-issue-marker" aria-hidden="true">!</div>
+                      <div>
+                        <p class="readiness-item-title">{issue.title}</p>
+                        <p class="readiness-item-detail">{issue.detail}</p>
+                        <p class="readiness-item-action"><span>Gjør dette:</span> {issue.action}</p>
+                        {#if issue.people?.length}
+                          <ul class="readiness-people" aria-label={`Personer som ikke er matchet for ${issue.title}`}>
+                            {#each issue.people as person}
+                              <li><span>{person.name}</span><strong>{formatCurrency(person.amount)}</strong></li>
+                            {/each}
+                          </ul>
+                        {/if}
+                      </div>
+                    </li>
+                  {/each}
+                </ol>
+              {:else}
+                <div class="readiness-empty">
+                  <span aria-hidden="true">✓</span>
+                  <p>Ingen kjente dataavvik for valgt år og uttrekk.</p>
+                </div>
+              {/if}
+            </section>
+
+            <section class="readiness-section" aria-labelledby="manual-work-title">
+              <div class="readiness-section-head">
+                <div>
+                  <p class="readiness-kicker">Manuelt arbeid</p>
+                  <h3 id="manual-work-title">Tall, tekst og vurderinger</h3>
+                </div>
+                <button class="readiness-link" type="button" on:click={() => (activeTab = "arsrapport")}>Gå til manuelle felt</button>
+              </div>
+
+              <ul class="manual-task-list">
+                {#each manualInputTasks as task}
+                  <li class:manual-task-complete={task.complete} class="manual-task">
+                    <span class="manual-task-status" aria-hidden="true">{task.complete ? "✓" : "•"}</span>
+                    <div>
+                      <p class="readiness-item-title">{task.label}</p>
+                      <p class="readiness-item-detail">{task.complete ? "Fylt ut og klar for eksport." : task.description}</p>
+                    </div>
+                    <span class="manual-task-badge">{task.complete ? "Fylt ut" : "Mangler"}</span>
+                  </li>
+                {/each}
+              </ul>
+
+              <div class="readiness-assessments">
+                <p class="readiness-subtitle">Må vurderes og beskrives i rapporten</p>
+                <ul>
+                  {#each manualAssessmentTasks as task}
+                    <li>{task}</li>
+                  {/each}
+                </ul>
+              </div>
+            </section>
+          </div>
+
+          <p class="readiness-footer">Rapportutkastet kan lastes ned underveis, men avvikene bør være avklart før publisering.</p>
+        </section>
+      {/if}
+
       {#if error}
         <div class="error-box mb-3 px-3 py-2 text-xs">{error}</div>
       {/if}
@@ -2742,16 +2974,6 @@
               </div>
             </div>
           </div>
-
-          {#if report?.notes?.length}
-            <div class="info-box mt-4 px-3 py-2 text-xs">
-              <ul class="list-disc pl-5">
-                {#each report.notes as note}
-                  <li>{note}</li>
-                {/each}
-              </ul>
-            </div>
-          {/if}
 
         </div>
         {#if uploadedFiles.length}
