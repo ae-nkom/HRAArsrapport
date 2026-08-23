@@ -7,6 +7,7 @@
   import { onMount, tick } from "svelte";
   import {
     buildParentalLeaveEmployeesByYear,
+    consumeSelectedFiles,
     leaveDaysForRow,
     selectExactSnapshotFiles,
     summarizeParentalLeaveByYear,
@@ -1969,7 +1970,7 @@
   }
 
   async function handleUpload(event) {
-    const incoming = Array.from(event.currentTarget.files || []);
+    const incoming = consumeSelectedFiles(event.currentTarget);
     if (!incoming.length) return;
 
     loading = true;
@@ -1984,12 +1985,11 @@
       error = buildReadErrorMessage(incoming, "Kunne ikke lese de opplastede filene.", caughtError);
     } finally {
       loading = false;
-      event.currentTarget.value = "";
     }
   }
 
   async function handleRoleUpload(role, event) {
-    const incoming = Array.from(event.currentTarget.files || []);
+    const incoming = consumeSelectedFiles(event.currentTarget);
     if (!incoming.length) return;
 
     loading = true;
@@ -2010,7 +2010,6 @@
       error = buildReadErrorMessage(incoming, "Kunne ikke lese den opplastede filen.", caughtError);
     } finally {
       loading = false;
-      event.currentTarget.value = "";
     }
   }
 
@@ -2620,16 +2619,15 @@
               <h2 class="panel-title">Last opp lønnsgrunnlaget</h2>
               <p class="section-note mt-2">Filene behandles bare i nettleseren på denne maskinen. De sendes ikke til en server og lagres ikke mellom økter.</p>
             </div>
-            <label class="app-button app-button-primary cursor-pointer">
-              <input class="hidden" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={handleUpload} />
-              Last opp flere filer
-            </label>
+            <div class="batch-upload-control">
+              <label for="batch-upload" class="upload-control-label">Last opp alle fire samlet</label>
+              <input id="batch-upload" class="upload-file-input upload-file-input-batch" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={handleUpload} />
+            </div>
           </div>
 
           <div class="upload-grid gap-3">
             {#each uploadCardConfig as card}
-              <label class={`upload-card cursor-pointer min-h-[196px] p-4 ${roleUploads[card.role] ? "upload-card-ready" : "upload-card-pending"}`}>
-                <input class="hidden" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={(event) => handleRoleUpload(card.role, event)} />
+              <article class={`upload-card min-h-[196px] p-4 ${roleUploads[card.role] ? "upload-card-ready" : "upload-card-pending"}`}>
                 <div class="upload-card-head">
                   <p class="upload-card-label text-[13px]">{card.title}</p>
                   <span class={`upload-card-state text-xs ${roleUploads[card.role] ? "upload-card-state-ready" : "upload-card-state-pending"}`}>
@@ -2640,12 +2638,13 @@
                   <p class="upload-card-title text-[15px] leading-6">{card.description}</p>
                 </div>
                 <div class="upload-card-footer mt-3 gap-2">
-                  <span class={`upload-dropzone text-sm leading-6 ${roleUploads[card.role] ? "upload-dropzone-filled" : ""}`}>
-                    {roleUploads[card.role] ? roleUploads[card.role].fileName : "Velg Excel-fil"}
-                  </span>
+                  {#if roleUploads[card.role]}
+                    <span class="upload-selected-file">{roleUploads[card.role].fileName}</span>
+                  {/if}
+                  <input class="upload-file-input" type="file" aria-label={`Velg Excel-fil for ${card.title}`} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={(event) => handleRoleUpload(card.role, event)} />
                   <span class="upload-card-hint text-xs">XLSX · maks 15 MB</span>
                 </div>
-              </label>
+              </article>
             {/each}
           </div>
 

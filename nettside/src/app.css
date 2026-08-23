@@ -329,6 +329,65 @@
     gap: 3px;
   }
 
+  .batch-upload-control {
+    min-width: min(100%, 310px);
+    display: grid;
+    gap: 6px;
+  }
+
+  .upload-control-label {
+    color: var(--text-strong);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .upload-file-input {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid var(--border-soft);
+    border-radius: 8px;
+    background: var(--accent-050);
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 10px;
+    line-height: 1.2;
+    padding: 4px;
+    cursor: pointer;
+  }
+
+  .upload-file-input::file-selector-button {
+    min-height: 30px;
+    margin-right: 8px;
+    border: 0;
+    border-radius: 6px;
+    background: var(--accent-900);
+    color: #fff;
+    padding: 0 10px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .upload-file-input:hover::file-selector-button {
+    background: var(--accent-800);
+  }
+
+  .upload-file-input:focus-visible {
+    outline: 3px solid rgba(52, 95, 237, 0.35);
+    outline-offset: 2px;
+  }
+
+  .upload-file-input-batch {
+    background: #fff;
+  }
+
+  .upload-selected-file {
+    overflow-wrap: anywhere;
+    color: var(--text-strong);
+    font-size: 9px;
+    line-height: 1.35;
+  }
+
   .upload-dropzone {
     min-height: 28px;
     border: 1px solid var(--border-soft);

@@ -103,6 +103,12 @@ export function validateWorkbookFile(file, maxBytes = 15 * 1024 * 1024) {
   return true;
 }
 
+export function consumeSelectedFiles(fileInput) {
+  const files = Array.from(fileInput?.files || []);
+  if (fileInput) fileInput.value = "";
+  return files;
+}
+
 export function buildParentalLeaveEmployeesByYear(rows, year) {
   const byPerson = new Map();
 

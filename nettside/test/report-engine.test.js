@@ -1,12 +1,23 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  consumeSelectedFiles,
   countNorwegianWorkingDays,
   norwegianPublicHolidayKeys,
   selectExactSnapshotFiles,
   summarizeParentalLeaveByYear,
   validateWorkbookFile
 } from "../src/lib/report-engine.js";
+
+test("filvalget kopieres og nullstilles før asynkron Excel-lesing", () => {
+  const selected = [{ name: "fastlønn.xlsx" }, { name: "overtid.xlsx" }];
+  const input = { files: selected, value: "C:\\fakepath\\fastlønn.xlsx" };
+
+  const captured = consumeSelectedFiles(input);
+
+  assert.deepEqual(captured, selected);
+  assert.equal(input.value, "");
+});
 
 test("norske bevegelige helligdager for 2025 følger kalenderen", () => {
   const holidays = norwegianPublicHolidayKeys(2025);
