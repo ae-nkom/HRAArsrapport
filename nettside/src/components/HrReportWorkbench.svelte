@@ -31,6 +31,7 @@
   const maxUploadBytes = 15 * 1024 * 1024;
   const maxWorkbookRows = 25_000;
   const maxWorkbookColumns = 250;
+  const fileSelectionWatchers = new WeakMap();
   const uploadCardConfig = [
     {
       role: "fastlønn",
@@ -1132,10 +1133,10 @@
     if (lower.includes("overtid")) {
       return { role: "overtid", source: isBearbeidet ? "bearbeidet" : "rådata", label: "Overtid" };
     }
-    if (lower.includes("vakttillegg")) {
+    if (lower.includes("vakttillegg") || lower.includes("vakt")) {
       return { role: "vakttillegg", source: isBearbeidet ? "bearbeidet" : "rådata", label: "Vakttillegg" };
     }
-    if (lower.includes("foreldrepermis")) {
+    if (lower.includes("foreldrepermis") || lower.includes("permisjon")) {
       return { role: "foreldrepermisjon", source: isBearbeidet ? "bearbeidet" : "rådata", label: "Foreldrepermisjon" };
     }
     if (
@@ -1969,8 +1970,32 @@
     dataSourceLabel = sourceLabel;
   }
 
+  function stopFileSelectionWatcher(input) {
+    const timer = fileSelectionWatchers.get(input);
+    if (timer) window.clearTimeout(timer);
+    fileSelectionWatchers.delete(input);
+  }
+
+  function watchFileSelection(input, role = null, attempt = 0) {
+    stopFileSelectionWatcher(input);
+    const timer = window.setTimeout(() => {
+      if (input.files?.length) {
+        if (role) {
+          handleRoleUpload(role, { currentTarget: input });
+        } else {
+          handleUpload({ currentTarget: input });
+        }
+        return;
+      }
+      if (attempt < 39) watchFileSelection(input, role, attempt + 1);
+    }, 250);
+    fileSelectionWatchers.set(input, timer);
+  }
+
   async function handleUpload(event) {
-    const incoming = consumeSelectedFiles(event.currentTarget);
+    const input = event.currentTarget;
+    stopFileSelectionWatcher(input);
+    const incoming = consumeSelectedFiles(input);
     if (!incoming.length) return;
 
     loading = true;
@@ -1989,7 +2014,9 @@
   }
 
   async function handleRoleUpload(role, event) {
-    const incoming = consumeSelectedFiles(event.currentTarget);
+    const input = event.currentTarget;
+    stopFileSelectionWatcher(input);
+    const incoming = consumeSelectedFiles(input);
     if (!incoming.length) return;
 
     loading = true;
@@ -2621,7 +2648,7 @@
             </div>
             <div class="batch-upload-control">
               <label for="batch-upload" class="upload-control-label">Last opp alle fire samlet</label>
-              <input id="batch-upload" class="upload-file-input upload-file-input-batch" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={handleUpload} />
+              <input id="batch-upload" class="upload-file-input upload-file-input-batch" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:click={(event) => watchFileSelection(event.currentTarget)} on:input={handleUpload} on:change={handleUpload} />
             </div>
           </div>
 
@@ -2641,7 +2668,7 @@
                   {#if roleUploads[card.role]}
                     <span class="upload-selected-file">{roleUploads[card.role].fileName}</span>
                   {/if}
-                  <input class="upload-file-input" type="file" aria-label={`Velg Excel-fil for ${card.title}`} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={(event) => handleRoleUpload(card.role, event)} />
+                  <input class="upload-file-input" type="file" aria-label={`Velg Excel-fil for ${card.title}`} accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:click={(event) => watchFileSelection(event.currentTarget, card.role)} on:input={(event) => handleRoleUpload(card.role, event)} on:change={(event) => handleRoleUpload(card.role, event)} />
                   <span class="upload-card-hint text-xs">XLSX · maks 15 MB</span>
                 </div>
               </article>
