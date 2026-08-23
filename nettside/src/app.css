@@ -10,7 +10,7 @@
   body {
     @apply text-xs text-slate-950;
     margin: 0;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: Lato, Arial, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     background: #f4f7f8;
     color: #18232b;
   }
@@ -99,7 +99,7 @@
     font-size: 18px;
     line-height: 1.2;
     font-weight: 500;
-    font-family: Georgia, serif;
+    font-family: inherit;
     min-width: 0;
   }
 

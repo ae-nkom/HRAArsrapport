@@ -1,31 +1,35 @@
 <script>
-  import { BarChart, BoxPlot, Heatmap, LineChart, ScatterPlot } from "@evidence-dev/core-components";
+  import BarChart from "./charts/BarChart.svelte";
+  import BoxPlot from "./charts/BoxPlot.svelte";
+  import Heatmap from "./charts/Heatmap.svelte";
+  import LineChart from "./charts/LineChart.svelte";
+  import ScatterPlot from "./charts/ScatterPlot.svelte";
   import { onMount, tick } from "svelte";
-  import { base } from "$app/paths";
-  import * as XLSX from "xlsx";
   import {
-    AlignmentType,
-    BorderStyle,
-    Document,
-    Packer,
-    Paragraph,
-    ShadingType,
-    Table,
-    TableCell,
-    TableRow,
-    TextRun,
-    WidthType,
-    HeadingLevel
-  } from "docx";
+    buildParentalLeaveEmployeesByYear,
+    leaveDaysForRow,
+    selectExactSnapshotFiles,
+    summarizeParentalLeaveByYear,
+    validateWorkbookFile
+  } from "../lib/report-engine.js";
+  let AlignmentType;
+  let BorderStyle;
+  let Document;
+  let Packer;
+  let Paragraph;
+  let ShadingType;
+  let Table;
+  let TableCell;
+  let TableRow;
+  let TextRun;
+  let WidthType;
+  let HeadingLevel;
 
   const requiredRoles = ["fastlønn", "overtid", "vakttillegg", "foreldrepermisjon"];
   const directorGroupUnderdirectors = new Set(["Meltevik|Stine", "Thune|Rita Lund"]);
-  const defaultDataFiles = [
-    "Utdrag fra SAP foreldrepermisjoner 2025 - Raadata.xlsx",
-    "Utdrag fra SAP ordinaer fastlonn per 311225 - Raadata.xlsx",
-    "Utdrag fra SAP overtid i 2025 - Raadata.xlsx",
-    "Utdrag fra SAP vakttillegg i 2025 - Raadata.xlsx"
-  ];
+  const maxUploadBytes = 15 * 1024 * 1024;
+  const maxWorkbookRows = 25_000;
+  const maxWorkbookColumns = 250;
   const uploadCardConfig = [
     {
       role: "fastlønn",
@@ -111,8 +115,11 @@
   let report = null;
   let loading = false;
   let error = "";
-  let dataSourceLabel = "Standardfiler fra default_data";
+  let dataSourceLabel = "Ingen filer lastet opp";
   let expandedView = null;
+  let expandedDialog;
+  let expandedCloseButton;
+  let focusBeforeDialog;
   let selectedFastlonnYear = "";
   let selectedFastlonnPeriodKey = "12-31";
   let activeTab = "opplasting";
@@ -189,13 +196,7 @@
     .map((period) => ({
       ...period,
       exactSnapshot: selectedFastlonnYearSnapshots.find((file) => file.snapshotKey?.slice(5) === period.key) ?? null,
-      available: Boolean(
-        selectedFastlonnYearSnapshots.find((file) => {
-          const snapshotDate = parseSnapshotKeyDate(file.snapshotKey);
-          const targetDate = periodDateForYear(selectedFastlonnYear, period.key);
-          return snapshotDate && targetDate && snapshotDate.getTime() >= targetDate.getTime();
-        })
-      )
+      available: Boolean(selectedFastlonnYearSnapshots.find((file) => file.snapshotKey?.slice(5) === period.key))
     }));
   $: {
     const fallbackPeriod = fastlonnPeriodChoices.find((period) => period.available)?.key ?? "12-31";
@@ -288,8 +289,10 @@
   })();
   $: overtidParticipants = report?.fastlonn ? buildVariablePayParticipants(overtidSourceRows, report.fastlonn.employeeIndex) : [];
   $: vakttilleggParticipants = report?.fastlonn ? buildVariablePayParticipants(vakttilleggSourceRows, report.fastlonn.employeeIndex) : [];
-  $: foreldrepermisjonEmployees = buildParentalLeaveEmployees(foreldrepermisjonSourceRows);
-  $: foreldrepermisjonGroupedEmployees = report?.fastlonn ? buildParentalLeaveGroupedEmployees(foreldrepermisjonSourceRows, report.fastlonn.employeeIndex) : [];
+  $: overtidReconciliation = report?.fastlonn ? buildVariablePayReconciliation(overtidSourceRows, report.fastlonn.employeeIndex) : null;
+  $: vakttilleggReconciliation = report?.fastlonn ? buildVariablePayReconciliation(vakttilleggSourceRows, report.fastlonn.employeeIndex) : null;
+  $: foreldrepermisjonEmployees = buildParentalLeaveEmployees(foreldrepermisjonSourceRows, selectedFastlonnYear);
+  $: foreldrepermisjonGroupedEmployees = report?.fastlonn ? buildParentalLeaveGroupedEmployees(foreldrepermisjonSourceRows, report.fastlonn.employeeIndex, selectedFastlonnYear) : [];
   $: fastlonnEmployeePreview = report?.fastlonn?.employees
     ? [...report.fastlonn.employees]
         .sort((left, right) => left.group.localeCompare(right.group, "nb") || left.name.localeCompare(right.name, "nb"))
@@ -607,7 +610,7 @@
     workPatternGap
       ? {
           eyebrow: "Arbeidsmønster",
-          metric: `${formatPercent(Math.abs(workPatternGap.womenShare - workPatternGap.menShare))}poeng`,
+          metric: `${formatPercentValue(Math.abs(workPatternGap.womenShare - workPatternGap.menShare))} prosentpoeng`,
           title: workPatternGap.label,
           takeaway: "Største forskjell mellom kvinner og menn i arbeidsmønster.",
           tone: "fastlonn-kpi-card-work-pattern"
@@ -688,19 +691,19 @@
     },
     {
       label: "Match overtid mot fastlønn",
-      status: !overtidSourceRows.length ? "Ingen data" : overtidParticipants.length === overtidSourceDistinctEmployees ? "Klar" : "Svak",
+      status: !overtidSourceRows.length ? "Ingen data" : overtidReconciliation?.unmatchedCount ? "Svak" : "Klar",
       detail: !overtidSourceRows.length
         ? "Ingen overtidsrader i valgt år."
-        : `${formatInteger(overtidParticipants.length)} av ${formatInteger(overtidSourceDistinctEmployees)} ansatte med overtid er matchet mot fastlønn.`,
-      tone: !overtidSourceRows.length ? "neutral" : overtidParticipants.length === overtidSourceDistinctEmployees ? "ok" : "warning"
+        : `${formatInteger(overtidReconciliation?.matchedCount || 0)} av ${formatInteger(overtidReconciliation?.sourceCount || overtidSourceDistinctEmployees)} ansatte er matchet. ${formatCurrency(overtidReconciliation?.unmatchedAmount || 0)} ligger uten gruppetilknytning.`,
+      tone: !overtidSourceRows.length ? "neutral" : overtidReconciliation?.unmatchedCount ? "warning" : "ok"
     },
     {
       label: "Match vakttillegg mot fastlønn",
-      status: !vakttilleggSourceRows.length ? "Ingen data" : vakttilleggParticipants.length === vakttilleggSourceDistinctEmployees ? "Klar" : "Svak",
+      status: !vakttilleggSourceRows.length ? "Ingen data" : vakttilleggReconciliation?.unmatchedCount ? "Svak" : "Klar",
       detail: !vakttilleggSourceRows.length
         ? "Ingen vakttilleggsrader i valgt år."
-        : `${formatInteger(vakttilleggParticipants.length)} av ${formatInteger(vakttilleggSourceDistinctEmployees)} ansatte med vakttillegg er matchet mot fastlønn.`,
-      tone: !vakttilleggSourceRows.length ? "neutral" : vakttilleggParticipants.length === vakttilleggSourceDistinctEmployees ? "ok" : "warning"
+        : `${formatInteger(vakttilleggReconciliation?.matchedCount || 0)} av ${formatInteger(vakttilleggReconciliation?.sourceCount || vakttilleggSourceDistinctEmployees)} ansatte er matchet. ${formatCurrency(vakttilleggReconciliation?.unmatchedAmount || 0)} ligger uten gruppetilknytning.`,
+      tone: !vakttilleggSourceRows.length ? "neutral" : vakttilleggReconciliation?.unmatchedCount ? "warning" : "ok"
     },
     {
       label: "Foreldrepermisjon mot fastlønn",
@@ -753,7 +756,7 @@
       ? {
           title: "Arbeidsmønster",
           metric: workPatternGap.label,
-          detail: `${formatPercent(Math.abs(workPatternGap.womenShare - workPatternGap.menShare))}poeng forskjell mellom kvinner og menn.`
+          detail: `${formatPercentValue(Math.abs(workPatternGap.womenShare - workPatternGap.menShare))} prosentpoeng forskjell mellom kvinner og menn.`
         }
       : null
   ].filter(Boolean);
@@ -865,7 +868,7 @@
     return value ? "text-[#0f2747]" : "text-slate-400";
   }
 
-  function openExpandedView(id, title, note = "") {
+  async function openExpandedView(id, title, note = "") {
     if (id === "fastlonn-employee-preview-table") {
       fastlonnPopupColumnMode = "default";
     }
@@ -878,7 +881,10 @@
     if (id === "foreldrepermisjon-table") {
       foreldrepermisjonPopupColumnMode = "default";
     }
+    focusBeforeDialog = document.activeElement;
     expandedView = { id, title, note };
+    await tick();
+    expandedCloseButton?.focus();
   }
 
   async function syncPopupScrollbars(type) {
@@ -952,6 +958,28 @@
 
   function closeExpandedView() {
     expandedView = null;
+    tick().then(() => focusBeforeDialog?.focus?.());
+  }
+
+  function handleDialogKeydown(event) {
+    if (!expandedView) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeExpandedView();
+      return;
+    }
+    if (event.key !== "Tab" || !expandedDialog) return;
+    const focusable = [...expandedDialog.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function handleExpandKeydown(event, id, title, note = "") {
@@ -1219,6 +1247,16 @@
   function buildEmployeeIndex(rows, snapshotDate) {
     const chosenByPerson = new Map();
     const dateColumns = detectEmploymentDateColumns(rows);
+    const unknownByCode = new Map();
+    for (const record of rows) {
+      const title = String(record["Stillingsgruppe betegnelse"] || "").trim();
+      const hasPerson = Boolean(record["Etternavn"] || record["Fornavn"] || record["Ansattnr - navn"]);
+      const hasGender = Boolean(record["Nøkkel for kjønn"] || record["Kjønn"]);
+      if (hasPerson && hasGender && !employeeGroup(record)) {
+        const code = title.split(/\s+/)[0] || "Mangler kode";
+        unknownByCode.set(code, (unknownByCode.get(code) || 0) + 1);
+      }
+    }
     const candidates = rows
       .map((record) => {
         const aliases = [
@@ -1262,7 +1300,11 @@
       return candidate.employee;
     });
 
-    return { employees, byName };
+    return {
+      employees,
+      byName,
+      unknownPositionCodes: [...unknownByCode.entries()].map(([code, count]) => ({ code, count }))
+    };
   }
 
   function summarizeEmployment(employees) {
@@ -1501,48 +1543,6 @@
     });
   }
 
-  function summarizeParentalLeave(rows) {
-    const byPerson = new Map();
-
-    for (const row of rows) {
-      if (!row["Kjønn"] || !row["Fornavn"] || !row["Etternavn"]) continue;
-
-      const key = `${row["Etternavn"]}|${row["Fornavn"]}|${row["Kjønn"]}`;
-      const current = byPerson.get(key) || {
-        gender: row["Kjønn"],
-        days: 0,
-        weightedDays: 0
-      };
-
-      const days = Number(row["Frav.dager"] || 0);
-      const workAbility = Number(row["Arbeidsførhet"] || 0);
-
-      current.days += days;
-      current.weightedDays += days * (100 - workAbility) / 100;
-      byPerson.set(key, current);
-    }
-
-    const employees = [...byPerson.values()];
-    const women = employees.filter((employee) => employee.gender === "Kvinne");
-    const men = employees.filter((employee) => employee.gender === "Mann");
-    const totalWeightedDays = employees.reduce((sum, employee) => sum + employee.weightedDays, 0);
-    const totalEmployees = employees.length;
-
-    return {
-      totalEmployees,
-      womenCount: women.length,
-      menCount: men.length,
-      womenAvgWeeks: women.length ? women.reduce((sum, employee) => sum + employee.weightedDays, 0) / women.length / 5 : 0,
-      menAvgWeeks: men.length ? men.reduce((sum, employee) => sum + employee.weightedDays, 0) / men.length / 5 : 0,
-      womenShareDays: totalWeightedDays
-        ? women.reduce((sum, employee) => sum + employee.weightedDays, 0) / totalWeightedDays * 100
-        : 0,
-      menShareDays: totalWeightedDays
-        ? men.reduce((sum, employee) => sum + employee.weightedDays, 0) / totalWeightedDays * 100
-        : 0
-    };
-  }
-
   function summarizeFastlonn(rows, snapshotDate) {
     const employeeIndex = buildEmployeeIndex(rows, snapshotDate);
     const employees = employeeIndex.employees;
@@ -1585,7 +1585,7 @@
       };
     });
 
-    return { employees, employeeIndex, genderBalance, fastlonn };
+    return { employees, employeeIndex, genderBalance, fastlonn, unknownPositionCodes: employeeIndex.unknownPositionCodes };
   }
 
   function buildFastlonnRows(files) {
@@ -1618,10 +1618,7 @@
     const targetSnapshotDate = periodDateForYear(selectedYear, selectedPeriodKey);
 
     const fastlonnFilesForPeriod = targetSnapshotDate
-      ? fastlonnFilesForYear.filter((file) => {
-          const snapshotDate = parseSnapshotKeyDate(file.snapshotKey);
-          return snapshotDate && snapshotDate.getTime() >= targetSnapshotDate.getTime();
-        })
+      ? selectExactSnapshotFiles(fastlonnFilesForYear, selectedYear, selectedPeriodKey)
       : fastlonnFilesForYear;
 
     return {
@@ -1686,47 +1683,51 @@
     return [...totalsByPerson.values()].sort((left, right) => right.amount - left.amount || left.name.localeCompare(right.name, "nb"));
   }
 
-  function summarizeVariablePayParticipants(participants) {
+  function buildVariablePayReconciliation(rows, employeeIndex) {
+    const sourceTotals = new Map();
+    for (const row of rows) {
+      const key = normalizePersonName(row["Etternavn, fornavn"]);
+      if (!key) continue;
+      sourceTotals.set(key, (sourceTotals.get(key) || 0) + Number(row["Beløp"] || 0));
+    }
+    const positiveSource = [...sourceTotals.entries()].filter(([, amount]) => amount > 0);
+    const matchedKeys = new Set(
+      positiveSource
+        .filter(([key]) => employeeIndex.byName.get(key)?.group)
+        .map(([key]) => key)
+    );
+    const sourceAmount = positiveSource.reduce((sum, [, amount]) => sum + amount, 0);
+    const matchedAmount = positiveSource.reduce((sum, [key, amount]) => sum + (matchedKeys.has(key) ? amount : 0), 0);
+    return {
+      sourceCount: positiveSource.length,
+      matchedCount: matchedKeys.size,
+      unmatchedCount: positiveSource.length - matchedKeys.size,
+      sourceAmount,
+      matchedAmount,
+      unmatchedAmount: sourceAmount - matchedAmount
+    };
+  }
+
+  function summarizeVariablePayParticipants(participants, reconciliation = null) {
     const women = participants.filter((participant) => participant.gender === "Kvinne").length;
     const men = participants.filter((participant) => participant.gender === "Mann").length;
     return {
-      total: participants.length,
+      total: reconciliation?.sourceCount ?? participants.length,
+      matched: participants.length,
+      unmatched: reconciliation?.unmatchedCount ?? 0,
+      sourceAmount: reconciliation?.sourceAmount ?? amountSum(participants),
+      matchedAmount: reconciliation?.matchedAmount ?? amountSum(participants),
+      unmatchedAmount: reconciliation?.unmatchedAmount ?? 0,
       women,
       men
     };
   }
 
-  function buildParentalLeaveEmployees(rows) {
-    const byPerson = new Map();
-
-    for (const row of rows) {
-      if (!row["Kjønn"] || !row["Fornavn"] || !row["Etternavn"]) continue;
-
-      const key = `${row["Etternavn"]}|${row["Fornavn"]}|${row["Kjønn"]}`;
-      const current = byPerson.get(key) || {
-        name: `${row["Etternavn"]}, ${row["Fornavn"]}`,
-        gender: row["Kjønn"],
-        days: 0,
-        weightedDays: 0
-      };
-
-      const days = Number(row["Frav.dager"] || 0);
-      const workAbility = Number(row["Arbeidsførhet"] || 0);
-
-      current.days += days;
-      current.weightedDays += days * (100 - workAbility) / 100;
-      byPerson.set(key, current);
-    }
-
-    return [...byPerson.values()]
-      .map((employee) => ({
-        ...employee,
-        weeks: employee.weightedDays / 5
-      }))
-      .sort((left, right) => right.weightedDays - left.weightedDays || left.name.localeCompare(right.name, "nb"));
+  function buildParentalLeaveEmployees(rows, year) {
+    return buildParentalLeaveEmployeesByYear(rows, year);
   }
 
-  function buildParentalLeaveGroupedEmployees(rows, employeeIndex) {
+  function buildParentalLeaveGroupedEmployees(rows, employeeIndex, year) {
     const byPerson = new Map();
 
     for (const row of rows) {
@@ -1745,11 +1746,10 @@
         weightedDays: 0
       };
 
-      const days = Number(row["Frav.dager"] || 0);
-      const workAbility = Number(row["Arbeidsførhet"] || 0);
+      const days = leaveDaysForRow(row, year);
 
       current.days += days;
-      current.weightedDays += days * (100 - workAbility) / 100;
+      current.weightedDays += days;
       byPerson.set(key, current);
     }
 
@@ -1820,9 +1820,11 @@
     const employment = fastlonn ? summarizeEmployment(fastlonn.employees) : null;
     const overtid = overtidRows.length && fastlonn ? summarizeVariablePay(overtidRows, fastlonn.employeeIndex) : null;
     const vakttillegg = vakttilleggRows.length && fastlonn ? summarizeVariablePay(vakttilleggRows, fastlonn.employeeIndex) : null;
-    const foreldrepermisjon = foreldrepermisjonRows.length ? summarizeParentalLeave(foreldrepermisjonRows) : null;
+    const foreldrepermisjon = foreldrepermisjonRows.length ? summarizeParentalLeaveByYear(foreldrepermisjonRows, selectedYear) : null;
     const overtidParticipants = fastlonn ? buildVariablePayParticipants(overtidRows, fastlonn.employeeIndex) : [];
     const vakttilleggParticipants = fastlonn ? buildVariablePayParticipants(vakttilleggRows, fastlonn.employeeIndex) : [];
+    const overtidReconciliation = fastlonn ? buildVariablePayReconciliation(overtidRows, fastlonn.employeeIndex) : null;
+    const vakttilleggReconciliation = fastlonn ? buildVariablePayReconciliation(vakttilleggRows, fastlonn.employeeIndex) : null;
 
     const notes = [];
     if (files.some((file) => file.source === "bearbeidet")) {
@@ -1830,6 +1832,13 @@
     }
     if (files.some((file) => file.source === "referanse")) {
       notes.push("Utregningsskjema er lastet opp som referanse. Det skal ikke være nødvendig i den ferdige automatiseringen.");
+    }
+    if (fastlonn?.unknownPositionCodes?.length) {
+      const description = fastlonn.unknownPositionCodes.map(({ code, count }) => `${code} (${count})`).join(", ");
+      notes.push(`Stillingskoder uten definert rapportgruppe er utelatt fra lønns- og kjønnsfordelingen: ${description}. Avklar kodene før publisering.`);
+    }
+    if (selectedYear === "2025" && employment && (employment.partTime.women !== 2 || employment.partTime.men !== 2)) {
+      notes.push(`Deltid avviker fra oppgitt 2025-fasit på 2 kvinner og 2 menn. Rådata med definisjonen deltidsprosent under 100 gir ${employment.partTime.women} kvinner og ${employment.partTime.men} menn. Avklar definisjonen før publisering.`);
     }
     if (selectedYear) {
       if (!fastlonnFilesForPeriod.length) {
@@ -1845,6 +1854,12 @@
         notes.push(`Fant ingen foreldrepermisjonsrader for ${selectedYear} basert på Start og Slutt.`);
       }
     }
+    if (overtidReconciliation?.unmatchedCount) {
+      notes.push(`${overtidReconciliation.unmatchedCount} ansatte med overtid er ikke i valgt fastlønnsuttrekk. Beløpet ${formatCurrency(overtidReconciliation.unmatchedAmount)} er med i kildetotalen, men ikke fordelt på stillingsgruppe eller kjønn.`);
+    }
+    if (vakttilleggReconciliation?.unmatchedCount) {
+      notes.push(`${vakttilleggReconciliation.unmatchedCount} ansatte med vakttillegg er ikke i valgt fastlønnsuttrekk. Beløpet ${formatCurrency(vakttilleggReconciliation.unmatchedAmount)} er med i kildetotalen, men ikke fordelt på stillingsgruppe eller kjønn.`);
+    }
 
     return {
       generatedAt: new Date().toISOString(),
@@ -1853,9 +1868,9 @@
       fastlonn,
       employment,
       overtid,
-      overtidParticipants: summarizeVariablePayParticipants(overtidParticipants),
+      overtidParticipants: summarizeVariablePayParticipants(overtidParticipants, overtidReconciliation),
       vakttillegg,
-      vakttilleggParticipants: summarizeVariablePayParticipants(vakttilleggParticipants),
+      vakttilleggParticipants: summarizeVariablePayParticipants(vakttilleggParticipants, vakttilleggReconciliation),
       foreldrepermisjon,
       notes
     };
@@ -1863,10 +1878,17 @@
 
   async function parseExcelFiles(files) {
     const parsed = [];
+    for (const file of files) validateWorkbookFile(file, maxUploadBytes);
+    const XLSX = await import("xlsx");
 
     for (const file of files) {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const workbook = XLSX.read(await file.arrayBuffer(), {
+        type: "array",
+        dense: true,
+        sheetRows: maxWorkbookRows + 2
+      });
       const sheetName = workbook.SheetNames[0];
+      if (!sheetName) throw new Error(`${file.name} inneholder ingen regneark.`);
       const sheet = workbook.Sheets[sheetName];
       const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
       const headerRow = matrix.find((row) => row.some((cell) => String(cell).trim() !== "")) || [];
@@ -1874,6 +1896,12 @@
       const rows = matrix
         .slice(headerIndex + 1)
         .filter((row) => row.some((cell) => String(cell).trim() !== ""));
+      if (rows.length > maxWorkbookRows) {
+        throw new Error(`${file.name} har mer enn ${maxWorkbookRows.toLocaleString("nb-NO")} datarader.`);
+      }
+      if (headerRow.length > maxWorkbookColumns) {
+        throw new Error(`${file.name} har mer enn ${maxWorkbookColumns} kolonner.`);
+      }
       const rowObjects = XLSX.utils.sheet_to_json(sheet, { defval: "" });
       const meta = detectFileMeta(file.name, headerRow.map((cell) => String(cell)));
       const derivedFileYear = deriveFileYear(meta.role, rowObjects, meta.fileYear || "");
@@ -1938,49 +1966,6 @@
     const parsed = await parseExcelFiles(files);
     uploadedFiles = mergeFiles(uploadedFiles, parsed);
     dataSourceLabel = sourceLabel;
-  }
-
-  async function loadDefaultFiles() {
-    if (!defaultDataFiles.length) return;
-
-    loading = true;
-    error = "";
-
-    try {
-      const results = await Promise.allSettled(
-        defaultDataFiles.map(async (fileName) => {
-          const url = `${base}/default_data/${encodeURIComponent(fileName)}`;
-          const response = await fetch(url);
-          if (!response.ok) {
-            throw new Error(`Kunne ikke lese standardfilen ${fileName}.`);
-          }
-
-          const blob = await response.blob();
-          return new File([blob], fileName, {
-            type: blob.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          });
-        })
-      );
-
-      const successfulFiles = results
-        .filter((result) => result.status === "fulfilled")
-        .map((result) => result.value);
-      const failedMessages = results
-        .filter((result) => result.status === "rejected")
-        .map((result) => result.reason?.message || "Ukjent feil ved innlasting av standardfil.");
-
-      if (successfulFiles.length) {
-        await applyFiles(successfulFiles, "Standardfiler fra default_data");
-      }
-
-      if (failedMessages.length) {
-        error = failedMessages.join(" ");
-      }
-    } catch (caughtError) {
-      error = caughtError?.message || "Kunne ikke lese standardfilene.";
-    } finally {
-      loading = false;
-    }
   }
 
   async function handleUpload(event) {
@@ -2191,7 +2176,11 @@
       ...manualReportInputCache,
       [activeManualReportInputKey]: manualReportInputs
     };
-    window.localStorage.setItem(manualReportStorageKey, JSON.stringify(manualReportInputCache));
+    try {
+      window.localStorage.setItem(manualReportStorageKey, JSON.stringify(manualReportInputCache));
+    } catch {
+      error = "Kunne ikke lagre de manuelle feltene lokalt. Datafilene lagres aldri i nettleseren.";
+    }
   }
 
   function manualNoteBlock(prompt) {
@@ -2318,6 +2307,20 @@
   async function downloadReport() {
     const summary = report;
     if (!summary) return;
+    ({
+      AlignmentType,
+      BorderStyle,
+      Document,
+      Packer,
+      Paragraph,
+      ShadingType,
+      Table,
+      TableCell,
+      TableRow,
+      TextRun,
+      WidthType,
+      HeadingLevel
+    } = await import("docx"));
     const narratives = standardReportNarratives(summary, selectedFastlonnYear, manualReportInputs);
     const historyYears = reportHistoryYears(selectedFastlonnYear, summary);
     const reportYear = selectedFastlonnYear || new Date(summary.generatedAt).getFullYear();
@@ -2540,10 +2543,16 @@
 
   onMount(() => {
     sidebarCollapsed = window.localStorage.getItem("hr-arsrapport-sidebar-collapsed") === "true";
-    manualReportInputCache = JSON.parse(window.localStorage.getItem(manualReportStorageKey) || "{}");
+    try {
+      manualReportInputCache = JSON.parse(window.localStorage.getItem(manualReportStorageKey) || "{}");
+    } catch {
+      manualReportInputCache = {};
+      window.localStorage.removeItem(manualReportStorageKey);
+    }
     manualReportInputs = normalizeManualReportInputs(manualReportInputCache[activeManualReportInputKey]);
     loadedManualReportInputKey = activeManualReportInputKey;
-    loadDefaultFiles();
+    window.addEventListener("keydown", handleDialogKeydown);
+    return () => window.removeEventListener("keydown", handleDialogKeydown);
   });
 </script>
 
@@ -2609,13 +2618,18 @@
             <div>
               <p class="panel-eyebrow">Datagrunnlag</p>
               <h2 class="panel-title">Last opp lønnsgrunnlaget</h2>
+              <p class="section-note mt-2">Filene behandles bare i nettleseren på denne maskinen. De sendes ikke til en server og lagres ikke mellom økter.</p>
             </div>
+            <label class="app-button app-button-primary cursor-pointer">
+              <input class="hidden" type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={handleUpload} />
+              Last opp flere filer
+            </label>
           </div>
 
           <div class="upload-grid gap-3">
             {#each uploadCardConfig as card}
               <label class={`upload-card cursor-pointer min-h-[196px] p-4 ${roleUploads[card.role] ? "upload-card-ready" : "upload-card-pending"}`}>
-                <input class="hidden" type="file" accept=".xlsx,.xls" on:change={(event) => handleRoleUpload(card.role, event)} />
+                <input class="hidden" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" on:change={(event) => handleRoleUpload(card.role, event)} />
                 <div class="upload-card-head">
                   <p class="upload-card-label text-[13px]">{card.title}</p>
                   <span class={`upload-card-state text-xs ${roleUploads[card.role] ? "upload-card-state-ready" : "upload-card-state-pending"}`}>
@@ -2629,7 +2643,7 @@
                   <span class={`upload-dropzone text-sm leading-6 ${roleUploads[card.role] ? "upload-dropzone-filled" : ""}`}>
                     {roleUploads[card.role] ? roleUploads[card.role].fileName : "Velg Excel-fil"}
                   </span>
-                  <span class="upload-card-hint text-xs">XLSX eller XLS</span>
+                  <span class="upload-card-hint text-xs">XLSX · maks 15 MB</span>
                 </div>
               </label>
             {/each}
@@ -3769,18 +3783,18 @@
   </div>
 
   {#if expandedView}
-    <div class="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={expandedView.title}>
+    <div class="fixed inset-0 z-[80] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="expanded-dialog-title">
       <button class="absolute inset-0 bg-slate-950/60" type="button" aria-label="Lukk popup" on:click={closeExpandedView}></button>
-      <div class="relative z-10 max-h-[92vh] w-[min(96vw,1400px)] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div bind:this={expandedDialog} class="relative z-10 max-h-[92vh] w-[min(96vw,1400px)] overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div class="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4">
           <div>
             <p class="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Større visning</p>
-            <h3 class="mt-1 text-lg font-semibold text-[#0f2747]">{expandedView.title}</h3>
+            <h3 id="expanded-dialog-title" class="mt-1 text-lg font-semibold text-[#0f2747]">{expandedView.title}</h3>
             {#if expandedView.note}
               <p class="mt-1 text-sm text-slate-600">{expandedView.note}</p>
             {/if}
           </div>
-          <button class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" type="button" on:click={closeExpandedView}>
+          <button bind:this={expandedCloseButton} class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50" type="button" on:click={closeExpandedView}>
             Lukk
           </button>
         </div>
