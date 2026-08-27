@@ -95,6 +95,7 @@
     Menn: graphColors.darkPurple
   };
   const manualReportStorageKey = "hr-arsrapport-manual-report-inputs";
+  const readinessExpandedStorageKey = "hr-arsrapport-readiness-expanded";
   const groupChartColors = {
     "Totalt antall ansatte": graphColors.darkPurple,
     Direktørgruppen: graphColors.orange,
@@ -126,6 +127,7 @@
   let selectedFastlonnPeriodKey = "12-31";
   let activeTab = "opplasting";
   let sidebarCollapsed = false;
+  let readinessExpanded = true;
   let fastlonnPopupColumnMode = "default";
   let overtidPopupColumnMode = "default";
   let vakttilleggPopupColumnMode = "default";
@@ -2712,8 +2714,15 @@
     window.localStorage.setItem("hr-arsrapport-sidebar-collapsed", String(sidebarCollapsed));
   }
 
+  function toggleReadinessPanel() {
+    readinessExpanded = !readinessExpanded;
+    window.localStorage.setItem(readinessExpandedStorageKey, String(readinessExpanded));
+  }
+
   onMount(() => {
     sidebarCollapsed = window.localStorage.getItem("hr-arsrapport-sidebar-collapsed") === "true";
+    const savedReadinessState = window.localStorage.getItem(readinessExpandedStorageKey);
+    readinessExpanded = savedReadinessState === null ? true : savedReadinessState === "true";
     try {
       manualReportInputCache = JSON.parse(window.localStorage.getItem(manualReportStorageKey) || "{}");
     } catch {
@@ -2775,25 +2784,43 @@
       </section>
 
       {#if uploadedFiles.length}
-        <section class="readiness-panel" aria-labelledby="readiness-title">
+        <section class:readiness-panel-collapsed={!readinessExpanded} class="readiness-panel" aria-labelledby="readiness-title">
           <div class="readiness-header">
             <div>
               <p class="panel-eyebrow">Kontroll før rapport</p>
               <h2 id="readiness-title" class="readiness-title">Dette må følges opp</h2>
-              <p class="readiness-lead">Listen oppdateres automatisk når du laster opp nye filer eller fyller inn manuelle tall.</p>
+              {#if readinessExpanded}
+                <p class="readiness-lead">Listen oppdateres automatisk når du laster opp nye filer eller fyller inn manuelle tall.</p>
+              {/if}
             </div>
-            <div class="readiness-counts" aria-label="Status for gjenstående arbeid">
-              <span class={`readiness-count ${datasetReadinessIssues.length ? "readiness-count-error" : "readiness-count-ok"}`}>
-                {datasetReadinessIssues.length} dataavvik
-              </span>
-              <span class={`readiness-count ${incompleteManualInputCount ? "readiness-count-warning" : "readiness-count-ok"}`}>
-                {incompleteManualInputCount} manuelle tall mangler
-              </span>
+            <div class="readiness-header-actions">
+              <div class="readiness-counts" aria-label="Status for gjenstående arbeid">
+                <span class={`readiness-count ${datasetReadinessIssues.length ? "readiness-count-error" : "readiness-count-ok"}`}>
+                  {datasetReadinessIssues.length} dataavvik
+                </span>
+                <span class={`readiness-count ${incompleteManualInputCount ? "readiness-count-warning" : "readiness-count-ok"}`}>
+                  {incompleteManualInputCount} manuelle tall mangler
+                </span>
+              </div>
+              <button
+                class="readiness-toggle"
+                type="button"
+                aria-expanded={readinessExpanded}
+                aria-controls="readiness-details"
+                on:click={toggleReadinessPanel}
+              >
+                <span>{readinessExpanded ? "Skjul" : "Vis detaljer"}</span>
+                <svg class:readiness-toggle-icon-collapsed={!readinessExpanded} class="readiness-toggle-icon" viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="m5.5 12.5 4.5-5 4.5 5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" />
+                </svg>
+              </button>
             </div>
           </div>
 
-          <div class="readiness-grid">
-            <section class="readiness-section" aria-labelledby="dataset-issues-title">
+          {#if readinessExpanded}
+            <div id="readiness-details">
+              <div class="readiness-grid">
+                <section class="readiness-section" aria-labelledby="dataset-issues-title">
               <div class="readiness-section-head">
                 <div>
                   <p class="readiness-kicker">Datagrunnlag</p>
@@ -2828,9 +2855,9 @@
                   <p>Ingen kjente dataavvik for valgt år og uttrekk.</p>
                 </div>
               {/if}
-            </section>
+                </section>
 
-            <section class="readiness-section" aria-labelledby="manual-work-title">
+                <section class="readiness-section" aria-labelledby="manual-work-title">
               <div class="readiness-section-head">
                 <div>
                   <p class="readiness-kicker">Manuelt arbeid</p>
@@ -2860,10 +2887,12 @@
                   {/each}
                 </ul>
               </div>
-            </section>
-          </div>
+                </section>
+              </div>
 
-          <p class="readiness-footer">Rapportutkastet kan lastes ned underveis, men avvikene bør være avklart før publisering.</p>
+              <p class="readiness-footer">Rapportutkastet kan lastes ned underveis, men avvikene bør være avklart før publisering.</p>
+            </div>
+          {/if}
         </section>
       {/if}
 
