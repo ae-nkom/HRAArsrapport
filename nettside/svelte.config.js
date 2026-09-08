@@ -4,6 +4,9 @@ import adapter from "@sveltejs/adapter-static";
 const config = {
   kit: {
     adapter: adapter(),
+    paths: {
+      base: process.env.BASE_PATH || ""
+    },
     csp: {
       mode: "hash",
       directives: {
@@ -12,10 +15,11 @@ const config = {
         "style-src": ["self", "unsafe-inline"],
         "img-src": ["self", "data:", "blob:"],
         "font-src": ["self", "data:"],
-        "connect-src": ["self", "ws:", "wss:"],
+        "connect-src": process.env.NODE_ENV === "production" ? ["none"] : ["self", "ws:", "wss:"],
+        "worker-src": ["self"],
         "object-src": ["none"],
         "base-uri": ["self"],
-        "form-action": ["self"]
+        "form-action": ["none"]
       }
     },
     files: {

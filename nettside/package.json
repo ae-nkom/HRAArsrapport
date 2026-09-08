@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3773 --strictPort",
-    "build": "vite build",
+    "build": "vite build && node scripts/verify-build.mjs",
     "preview": "vite preview --port 3773 --strictPort",
-    "test": "node --test",
-    "check": "svelte-check --threshold error"
+    "test": "node --test test/*.test.js",
+    "check": "svelte-check --threshold error",
+    "test:browser": "playwright test",
+    "verify": "npm run check && npm test && npm run build && npm run test:browser"
   },
   "dependencies": {
     "@sveltejs/adapter-static": "3.0.10",
@@ -23,5 +25,15 @@
     "typescript": "6.0.3",
     "vite": "8.2.2",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "overrides": {
+    "cookie": "0.7.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "fflate": "^0.8.3"
   }
 }

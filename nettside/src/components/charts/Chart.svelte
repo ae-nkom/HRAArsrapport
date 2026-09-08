@@ -1,5 +1,5 @@
 <script>
-  import { buildNiceScale, formatChartTick, formatChartValue } from "./chart-utils.js";
+  import { buildChartScale, scaleFraction, chartNumber, formatChartTick, formatChartValue } from "./chart-utils.js";
 
   export let kind = "bar";
   export let data = [];
@@ -32,23 +32,26 @@
   const plotHeight = height - margin.top - margin.bottom;
   const fallbackColors = ["#3028aa", "#f15b0a", "#345fed", "#00a166", "#db2481", "#6085ff"];
 
-  $: safeData = Array.isArray(data) ? data.filter(Boolean) : [];
+  $: safeData = Array.isArray(data) ? data.filter((row) => row && (
+    kind === 'box' ? [min, intervalBottom, midpoint, intervalTop, max].every((key) => chartNumber(row[key])) :
+    kind === 'heatmap' ? chartNumber(row[value]) :
+    kind === 'scatter' ? chartNumber(row[x]) && chartNumber(row[y]) : chartNumber(row[y])
+  )) : [];
   $: categories = [...new Set(safeData.map((row) => String(row[x] ?? row[name] ?? "—")))];
   $: seriesNames = series
     ? (seriesOrder.length
         ? seriesOrder.filter((item) => safeData.some((row) => String(row[series] ?? "") === String(item)))
         : [...new Set(safeData.map((row) => String(row[series] ?? "")))])
     : [""];
-  $: numericValues = safeData.map((row) => Number(row[y] ?? row[value] ?? 0)).filter(Number.isFinite);
-  $: rawMaximum = Math.max(0, ...numericValues, ...safeData.flatMap((row) => [Number(row[max] || 0), Number(row[intervalTop] || 0)]));
-  $: valueScale = type === "stacked100" ? { maximum: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : buildNiceScale(rawMaximum, 4, yFmt === "num0");
+  $: numericValues = safeData.flatMap((row) => kind === 'box' ? [row[min], row[max]] : [row[y] ?? row[value]]);
+  $: valueScale = type === 'stacked100' ? { minimum: 0, maximum: 1, ticks: [0, 0.25, 0.5, 0.75, 1] } : buildChartScale(numericValues, yFmt === 'num0');
   $: maximum = valueScale.maximum;
+  $: minimum = valueScale.minimum;
   $: axisTicks = valueScale.ticks;
-  $: xNumericMaximum = Math.max(0, ...safeData.map((row) => Number(row[x] || 0)));
-  $: xScale = buildNiceScale(xNumericMaximum, 4, xFmt === "num0");
+  $: xScale = buildChartScale(safeData.map((row) => row[x]), xFmt === 'num0');
   $: heatRows = [...new Set(safeData.map((row) => String(row[y] ?? "—")))];
-  $: barItems = buildBarItems();
-  $: lineSeries = buildLineSeries();
+  $: barItems = buildBarItems({ safeData, categories, seriesNames, series, x, y, type, swapXY, maximum, minimum, seriesColors, colorPalette });
+  $: lineSeries = buildLineSeries({ safeData, categories, seriesNames, series, x, y, maximum, minimum, seriesColors, colorPalette });
   $: horizontalAxisTitle = swapXY ? yAxisTitle : xAxisTitle;
   $: verticalAxisTitle = swapXY ? xAxisTitle : yAxisTitle;
   $: numericFormat = yFmt || valueFmt;
@@ -69,15 +72,15 @@
     return monthAndYear ? monthAndYear[1] : shortLabel(text, 8);
   }
 
-  function tickX(amount, scaleMaximum = maximum) {
-    return margin.left + Number(amount || 0) / Math.max(1, scaleMaximum) * plotWidth;
+  function tickX(amount, scaleMaximum = maximum, scaleMinimum = minimum) {
+    return margin.left + scaleFraction(amount, scaleMinimum, scaleMaximum) * plotWidth;
   }
 
   function tickY(amount) {
-    return margin.top + plotHeight - Number(amount || 0) / Math.max(1, maximum) * plotHeight;
+    return margin.top + plotHeight - scaleFraction(amount, minimum, maximum) * plotHeight;
   }
 
-  function buildBarItems() {
+  function buildBarItems({ safeData, categories, seriesNames, series, x, y, type, swapXY, maximum, minimum }) {
     const items = [];
     const categoryBand = (swapXY ? plotHeight : plotWidth) / Math.max(1, categories.length);
     const groupedBand = categoryBand * 0.7 / Math.max(1, seriesNames.length);
@@ -92,9 +95,9 @@
         if (!row) return;
         const rawValue = Number(row?.[y] || 0);
         const displayValue = type === "stacked100" ? rawValue / stackedTotal : rawValue;
-        const length = Math.max(0, displayValue / Math.max(1, maximum)) * (swapXY ? plotWidth : plotHeight);
+        const length = Math.abs(displayValue) / (maximum - minimum || 1) * (swapXY ? plotWidth : plotHeight);
         const groupedOffset = (categoryBand - groupedBand * seriesNames.length) / 2 + groupedBand * seriesIndex;
-        const stackLength = Math.max(0, stackOffset / Math.max(1, maximum)) * (swapXY ? plotWidth : plotHeight);
+        const stackLength = stackOffset / (maximum - minimum || 1) * (swapXY ? plotWidth : plotHeight);
         const isStacked = type === "stacked100";
 
         items.push({
@@ -102,9 +105,9 @@
           value: rawValue,
           displayValue,
           seriesName,
-          color: colorFor(seriesName, seriesIndex || categoryIndex),
-          x: swapXY ? margin.left + (isStacked ? stackLength : 0) : margin.left + categoryIndex * categoryBand + (isStacked ? categoryBand * 0.15 : groupedOffset),
-          y: swapXY ? margin.top + categoryIndex * categoryBand + (isStacked ? categoryBand * 0.15 : groupedOffset) : margin.top + plotHeight - length - (isStacked ? stackLength : 0),
+          color: colorFor(seriesName, series ? seriesIndex : categoryIndex),
+          x: swapXY ? tickX(Math.min(0, displayValue)) + (isStacked ? stackLength : 0) : margin.left + categoryIndex * categoryBand + (isStacked ? categoryBand * 0.15 : groupedOffset),
+          y: swapXY ? margin.top + categoryIndex * categoryBand + (isStacked ? categoryBand * 0.15 : groupedOffset) : tickY(Math.max(0, displayValue)) - (isStacked ? stackLength : 0),
           width: swapXY ? length : (isStacked ? categoryBand * 0.7 : groupedBand),
           height: swapXY ? (isStacked ? categoryBand * 0.7 : groupedBand) : length
         });
@@ -115,12 +118,13 @@
     return items;
   }
 
-  function buildLineSeries() {
+  function buildLineSeries({ safeData, categories, seriesNames, series, x, y }) {
     return seriesNames.map((seriesName, seriesIndex) => {
       const rows = series ? safeData.filter((row) => String(row[series] ?? "") === String(seriesName)) : safeData;
       const points = categories.map((category, index) => {
         const row = rows.find((item) => String(item[x] ?? "—") === category);
-        const amount = Number(row?.[y] || 0);
+        if (!row) return null;
+        const amount = Number(row[y]);
         return {
           category,
           amount,
@@ -128,14 +132,19 @@
           y: tickY(amount)
         };
       });
-      return { points, color: colorFor(seriesName, seriesIndex), seriesName };
+      const segments = [[]];
+      for (const point of points) {
+        if (point) segments[segments.length - 1].push(point);
+        else if (segments[segments.length - 1].length) segments.push([]);
+      }
+      return { points: points.filter(Boolean), segments: segments.filter((segment) => segment.length), color: colorFor(seriesName, seriesIndex), seriesName };
     });
   }
 
   function heatOpacity(row) {
     const amount = Number(row[value] || 0);
-    const heatMax = Math.max(1, ...safeData.map((item) => Number(item[value] || 0)));
-    return 0.18 + 0.82 * amount / heatMax;
+    const heatMax = Math.max(1, ...safeData.map((item) => Math.abs(Number(item[value] || 0))));
+    return 0.18 + 0.82 * Math.abs(amount) / heatMax;
   }
 </script>
 
@@ -163,8 +172,8 @@
 
       {#if kind === "scatter"}
         {#each xScale.ticks as tick}
-          <line x1={tickX(tick, xScale.maximum)} y1={margin.top} x2={tickX(tick, xScale.maximum)} y2={margin.top + plotHeight} class="grid-line" />
-          <text x={tickX(tick, xScale.maximum)} y={margin.top + plotHeight + 20} text-anchor="middle" class="tick-label">{formatChartTick(tick, xFmt)}</text>
+          <line x1={tickX(tick, xScale.maximum, xScale.minimum)} y1={margin.top} x2={tickX(tick, xScale.maximum, xScale.minimum)} y2={margin.top + plotHeight} class="grid-line" />
+          <text x={tickX(tick, xScale.maximum, xScale.minimum)} y={margin.top + plotHeight + 20} text-anchor="middle" class="tick-label">{formatChartTick(tick, xFmt)}</text>
         {/each}
         {#each axisTicks as tick}
           <line x1={margin.left} y1={tickY(tick)} x2={margin.left + plotWidth} y2={tickY(tick)} class="grid-line" />
@@ -175,15 +184,19 @@
       <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} class="axis" />
       <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotHeight} class="axis" />
 
+      {#if minimum < 0 && (kind === 'bar' || kind === 'line')}
+        {#if swapXY}<line x1={tickX(0)} x2={tickX(0)} y1={margin.top} y2={margin.top + plotHeight} class="axis" />
+        {:else}<line x1={margin.left} x2={margin.left + plotWidth} y1={tickY(0)} y2={tickY(0)} class="axis" />{/if}
+      {/if}
       {#if kind === "bar"}
         {#each barItems as item}
           <rect x={item.x} y={item.y} width={item.width} height={item.height} rx="3" fill={item.color}>
             <title>{item.category}{item.seriesName ? ` · ${item.seriesName}` : ""}: {formatChartValue(type === "stacked100" ? item.displayValue : item.value, yFmt)}</title>
           </rect>
           {#if swapXY}
-            <text x={item.x + item.width + 7} y={item.y + item.height / 2} dominant-baseline="middle" class="value-label">{formatChartValue(type === "stacked100" ? item.displayValue : item.value, yFmt)}</text>
+            <text x={item.displayValue < 0 ? item.x - 7 : item.x + item.width + 7} y={item.y + item.height / 2} text-anchor={item.displayValue < 0 ? "end" : "start"} dominant-baseline="middle" class="value-label">{formatChartValue(type === "stacked100" ? item.displayValue : item.value, yFmt)}</text>
           {:else}
-            <text x={item.x + item.width / 2} y={item.y - 7} text-anchor="middle" class="value-label">{formatChartValue(type === "stacked100" ? item.displayValue : item.value, yFmt)}</text>
+            <text x={item.x + item.width / 2} y={item.displayValue < 0 ? item.y + item.height + 16 : item.y - 7} text-anchor="middle" class="value-label">{formatChartValue(type === "stacked100" ? item.displayValue : item.value, yFmt)}</text>
           {/if}
         {/each}
         {#each categories as category, index}
@@ -197,7 +210,7 @@
         {/each}
       {:else if kind === "line"}
         {#each lineSeries as item}
-          <polyline points={item.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={item.color} stroke-width="4" stroke-linejoin="round"><title>{item.seriesName || yAxisTitle}</title></polyline>
+          {#each item.segments as segment}<polyline points={segment.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={item.color} stroke-width="4" stroke-linejoin="round"><title>{item.seriesName || yAxisTitle}</title></polyline>{/each}
           {#each item.points as point, index}
             <circle cx={point.x} cy={point.y} r="5" fill="#fff" stroke={item.color} stroke-width="3"><title>{point.category}: {formatChartValue(point.amount, yFmt)}</title></circle>
             <text x={point.x} y={point.y + (index % 2 ? 19 : -11)} text-anchor="middle" class="value-label line-value">{formatChartValue(point.amount, yFmt)}</text>
@@ -206,7 +219,7 @@
         {/each}
       {:else if kind === "scatter"}
         {#each safeData as row, index}
-          {@const cx = tickX(Number(row[x] || 0), xScale.maximum)}
+          {@const cx = tickX(Number(row[x] || 0), xScale.maximum, xScale.minimum)}
           {@const cy = tickY(Number(row[y] || 0))}
           <circle {cx} {cy} r="7" fill={colorFor(String(row[series] || ""), index)} opacity="0.86"><title>{row[series]}: {formatChartValue(row[x], xFmt)} · {formatChartValue(row[y], yFmt)}</title></circle>
           <text x={cx + 10} y={cy - 8} class="value-label">{shortLabel(row[series] || "", 17)}</text>
@@ -219,7 +232,7 @@
           {@const opacity = heatOpacity(row)}
           {@const cellX = margin.left + column * plotWidth / categories.length}
           {@const cellY = margin.top + heatRow * plotHeight / heatRows.length}
-          <rect x={cellX} y={cellY} width={plotWidth / categories.length - 3} height={plotHeight / heatRows.length - 3} rx="4" fill={colorScale[1]} {opacity}><title>{row[x]} · {row[y]}: {formatChartValue(row[value], valueFmt)}</title></rect>
+          <rect x={cellX} y={cellY} width={plotWidth / categories.length - 3} height={plotHeight / heatRows.length - 3} rx="4" fill={Number(row[value]) < 0 ? "#f15b0a" : colorScale[1]} {opacity}><title>{row[x]} · {row[y]}: {formatChartValue(row[value], valueFmt)}</title></rect>
           <text x={cellX + (plotWidth / categories.length - 3) / 2} y={cellY + (plotHeight / heatRows.length - 3) / 2} text-anchor="middle" dominant-baseline="middle" class:heat-value-light={opacity > 0.58} class="heat-value">{formatChartValue(row[value], valueFmt)}</text>
         {/each}
         {#each heatRows as rowName, index}<text x={margin.left - 10} y={margin.top + (index + 0.5) * plotHeight / heatRows.length} text-anchor="end" dominant-baseline="middle">{shortLabel(rowName)}</text>{/each}
@@ -228,9 +241,9 @@
         {#each safeData as row, index}
           {@const cy = margin.top + (index + 0.5) * plotHeight / safeData.length}
           {@const scale = (number) => tickX(number)}
-          <line x1={scale(row[min])} y1={cy} x2={scale(row[max])} y2={cy} stroke={colorFor("", index)} stroke-width="3" />
-          <rect x={scale(row[intervalBottom])} y={cy - 13} width={Math.max(2, scale(row[intervalTop]) - scale(row[intervalBottom]))} height="26" fill={colorFor("", index)} opacity="0.32" stroke={colorFor("", index)} />
-          <line x1={scale(row[midpoint])} y1={cy - 13} x2={scale(row[midpoint])} y2={cy + 13} stroke={colorFor("", index)} stroke-width="4"><title>{row[name]}: median {formatChartValue(row[midpoint], yFmt)}</title></line>
+          <line x1={scale(row[min])} y1={cy} x2={scale(row[max])} y2={cy} stroke={colorFor(String(row[name]), index)} stroke-width="3" />
+          <rect x={scale(row[intervalBottom])} y={cy - 13} width={Math.max(2, scale(row[intervalTop]) - scale(row[intervalBottom]))} height="26" fill={colorFor(String(row[name]), index)} opacity="0.32" stroke={colorFor(String(row[name]), index)} />
+          <line x1={scale(row[midpoint])} y1={cy - 13} x2={scale(row[midpoint])} y2={cy + 13} stroke={colorFor(String(row[name]), index)} stroke-width="4"><title>{row[name]}: median {formatChartValue(row[midpoint], yFmt)}</title></line>
           <text x={margin.left - 10} y={cy} text-anchor="end" dominant-baseline="middle">{shortLabel(row[name])}</text>
           <text x={scale(row[midpoint])} y={cy - 20} text-anchor="middle" class="value-label">Median {formatChartValue(row[midpoint], yFmt)}</text>
         {/each}

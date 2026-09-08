@@ -10,8 +10,11 @@ nettside/.env.*
 !nettside/.env.example
 
 # Internt HR-grunnlag og e-post skal aldri inn i repo eller bygg.
-/data/
+/data
 /*.eml
 /nettside/default_data/
 /nettside/static/default_data/
 *:Zone.Identifier
+nettside/test-results/
+nettside/playwright-report/
+nettside/coverage/

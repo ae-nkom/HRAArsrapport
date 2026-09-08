@@ -6,6 +6,7 @@ export function chartDecimalPlaces(format = "") {
 }
 
 export function formatChartValue(value, format = "") {
+  if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
 
@@ -20,6 +21,7 @@ export function formatChartValue(value, format = "") {
 }
 
 export function formatChartTick(value, format = "") {
+  if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
   if (!Number.isFinite(number)) return "—";
   if (format === "pct1") return formatChartValue(number, format);
@@ -36,6 +38,26 @@ export function formatChartTick(value, format = "") {
     minimumFractionDigits: 0,
     maximumFractionDigits: decimals
   }).format(number);
+}
+
+export function chartNumber(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+}
+
+export function buildChartScale(values, integersOnly = false) {
+  const numbers = values.filter(chartNumber).map(Number);
+  const lowest = Math.min(0, ...numbers);
+  const highest = Math.max(0, ...numbers);
+  if (lowest >= 0) return { minimum: 0, ...buildNiceScale(highest, 4, integersOnly) };
+  const positiveScale = buildNiceScale(highest - lowest, 4, integersOnly);
+  const step = positiveScale.ticks[1] - positiveScale.ticks[0];
+  const minimum = Math.floor(lowest / step) * step;
+  const maximum = Math.ceil(highest / step) * step;
+  return { minimum, maximum, ticks: Array.from({ length: Math.round((maximum - minimum) / step) + 1 }, (_, index) => minimum + index * step) };
+}
+
+export function scaleFraction(value, minimum, maximum) {
+  return (Number(value) - minimum) / (maximum - minimum || 1);
 }
 
 export function buildNiceScale(maximum, targetIntervals = 4, integersOnly = false) {
