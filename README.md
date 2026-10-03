@@ -88,4 +88,4 @@ Appen er gjennomgått mot e-posten og den vedlagte rapportmalen. Rapporttabellen
 
 Arbeidsflaten ligger i `nettside/src/components/`. Import, beregninger, datoer, diagramgrunnlag, rapporttekst og Word-eksport har separate moduler i `nettside/src/lib/`. Endringer i beregningsmetode skal følges av relevante regresjonstester.
 
-Jujutsu brukes for lokal versjonskontroll. [Gitea-repoet](http://localhost:3000/rogermarkussen/HRAArsrapport) er primær `origin`; [GitHub-repoet i ae-nkom](https://github.com/ae-nkom/HRAArsrapport) oppdateres gjennom et enveis push-speil. Oppdateringer av `main` starter automatisk kontroll og publisering på GitHub Pages. Ikke push direkte til GitHub.
+Git brukes for versjonskontroll. [GitHub-repoet i ae-nkom](https://github.com/ae-nkom/HRAArsrapport) er `origin`. Oppdateringer av `main` starter automatisk kontroll og publisering på GitHub Pages.
